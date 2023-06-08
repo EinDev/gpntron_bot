@@ -64,7 +64,7 @@ class ConnectionContext:
         self._sock.connect((dns, port))
         print("Connected!")
         self._connected = True
-        self._username = "EinDev"
+        self._username = open('username.txt').readline()
         self._password = open('password.txt').readline()
         self._loop = asyncio.get_event_loop()
         self._state = None
