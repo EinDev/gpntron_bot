@@ -58,23 +58,28 @@ class FieldCountAlgo:
     #   8. Return.
 
     @staticmethod
-    def flood_fill_count(field: list[list[int]], x: int, y: int, width: int, height: int):
+    def flood_fill_count(field: list[list[int]], x: int, y: int, width: int, height: int,
+                         player_positions: dict[int, list[int]]):
         q = queue.Queue()
         q.put((x, y))
-        num = 0
+        num_fields = 0
+        player_count = 0
         already_checked = []
         while not q.empty():
             n = q.get()
             if field[n[0]][n[1]] is None:
-                num += 1
+                num_fields += 1
                 for direc in Direction:
                     new_x = direc.get_x(n[0], width)
                     new_y = direc.get_y(n[1], height)
                     coords_hash = new_x + new_y * width
                     if coords_hash not in already_checked:
-                        q.put((new_x, new_y))
+                        q.put([new_x, new_y])
                         already_checked.append(coords_hash)
-        return num
+            else:
+                if n in player_positions.values():
+                    player_count += 1
+        return num_fields, player_count
 
     def _count_neighbors(self, x: int, y: int) -> int:
         num = 0
@@ -108,6 +113,7 @@ class GameState:
         self._last_positions = {}
         self._field_count = FieldCountAlgo()
         self._last_message_tick = 0
+        self.boxed_in = False
 
     def update_player_pos(self, playerid: int, pos_x: int, pos_y: int):
         # assert self._grid[pos_x][pos_y] is None
@@ -121,35 +127,56 @@ class GameState:
         print("Field at %i/%i at dir %s is %s" % (pos_x, pos_y, dir.value, str(field)))
         return field is not None
 
+    def _get_player_at(self, x: int, y: int):
+        for key, val in self._last_positions.items():
+            if val == [x, y]:
+                return key
+        return None
+
+    def _is_player_at(self, x: int, y: int):
+        return self._get_player_at(x, y) not in [None, self._own_playerid]
+
+    def _is_player_near(self, x: int, y: int):
+        return True in [
+            self._is_player_at(d.get_x(x, self._game_width), d.get_y(y, self._game_height))
+                for d in Direction
+        ]
+
     def get_move(self, tick: int) -> Optional[tuple[Direction, str]]:
-        chosen = None
-        # if not self._will_collide(self._current_dir):
-        #    chosen = self._current_dir
-        # else:
-        # dirs = [d for d in Direction]
-        # random.shuffle(dirs)
-        # for direc in dirs:
-        #    if not self._will_collide(direc):
-        #        chosen = direc
-        #        break
         pos_x = self._last_positions[self._own_playerid][0]
         pos_y = self._last_positions[self._own_playerid][1]
         max_fields = 0
-        max_dir = None
+        max_dir = Direction.UP
+        max_players = 0
         message = None
-        for direc in Direction:
+        dirs = [d for d in Direction]
+        if not self.boxed_in:
+            random.shuffle(dirs)
+        for direc in dirs:
             new_x = direc.get_x(pos_x, self._game_width)
             new_y = direc.get_y(pos_y, self._game_height)
-            amount = FieldCountAlgo.flood_fill_count(self._grid, new_x, new_y, self._game_width, self._game_height)
-            print("%s has %i neighbors" % (direc.name, amount))
+            amount, amount_players = FieldCountAlgo.flood_fill_count(self._grid, new_x, new_y, self._game_width,
+                                                                     self._game_height, self._last_positions)
+            print("%s has %i neighbors with %i players" % (direc.name, amount, amount_players))
+            could_collide = self._is_player_near(new_x, new_y)
+            if could_collide:
+                print("Not moving to %s because we could collide with another player!" % direc.name)
+                continue
             if amount > max_fields:
                 max_dir = direc
                 max_fields = amount
+                max_players = amount_players
+            if max_fields >= 1000:
+                break
+        if max_players == 1:  # myself
+            message = "I'm trapped!"
+            self.boxed_in = True
         if max_fields <= 20:
             message = "shit..."
         if message is None and tick - self._last_message_tick >= 100:
             message = random.choice(open("random_messages.txt").readlines())
             self._last_message_tick = tick
+        print("decided to move %s" % max_dir.name)
         return max_dir, message
 
         # if chosen is not None:
@@ -167,6 +194,7 @@ class GameState:
             return self._grid[x][(y + 1) % self._game_height]
 
     def remove_player(self, player_id: int):
+        self._last_positions.pop(player_id)
         for row in range(self._game_height):
             for col in range(self._game_width):
                 if self._grid[row][col] == player_id:
@@ -227,6 +255,7 @@ class ConnectionContext:
         elif code == "message":
             pass  # Wtf we want to ignore messages
         elif code == "die":
+            self._state.boxed_in = False
             for player_id in args:
                 print("Removing player %i" % int(player_id))
                 self._state.remove_player(int(player_id))
@@ -239,7 +268,7 @@ class ConnectionContext:
                 move_dir, message = self._state.get_move(self._tick)
                 if message is not None:
                     await self._send("chat", [message])
-                if move_dir is not None and self._tick > 3:
+                if move_dir is not None:
                     print("moving to %s" % move_dir.name)
                     await self._send("move", [move_dir.value])
         elif code == "game":
@@ -296,8 +325,6 @@ async def connect(dns, port):
     loop = asyncio.get_event_loop()
     ctx = ConnectionContext(dns, port)
     loop.create_task(ctx.client_loop())
-    print("Starting Bot Management Engine...")
-    loop.create_task(manual_event_server(ctx))
 
 
 if __name__ == '__main__':
