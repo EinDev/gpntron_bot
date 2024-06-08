@@ -3,7 +3,7 @@ powered by mate
 meow
 The cake is a lie
 speed 2X
-waiting for michael 1.1
+(still) waiting for michael 1.1
 -1 tiles remaining
 now with the latest ISDN!
 raise UnknownError()
@@ -14,4 +14,3 @@ I'm a smart bot
 i agree
 fork me on GitHub!
 I'm not scared, you are!
-...so call me maybe; 5356
